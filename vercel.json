@@ -1,0 +1,6 @@
+{
+  "root": "frontend copy",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev -- --host",
+  "installCommand": "npm install"
+}
