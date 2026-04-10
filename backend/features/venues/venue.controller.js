@@ -390,6 +390,57 @@ async function getPreferredGenres(req, res) {
   }
 }
 
+/**
+ * Submit venue to waitlist
+ */
+async function submitWaitlist(req, res) {
+  try {
+    const { name, venueName, email, phone, venueType } = req.body;
+
+    // Validation
+    if (!name || !venueName || !email || !phone || !venueType) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    console.log(`\n📧 WAITLIST SUBMISSION`);
+    console.log(`   Name: ${name}`);
+    console.log(`   Venue: ${venueName}`);
+    console.log(`   Email: ${email}`);
+    console.log(`   Type: ${venueType}`);
+
+    // Create waitlist entry
+    const Waitlist = require("../../models/Waitlist");
+    const waitlistEntry = await Waitlist.create({
+      name,
+      venueName,
+      email: email.toLowerCase(),
+      phone,
+      venueType
+    });
+
+    // Send confirmation email
+    const { sendWaitlistConfirmation } = require("../../services/emailService");
+    const emailResult = await sendWaitlistConfirmation(email, name, venueName);
+
+    if (emailResult.success) {
+      await Waitlist.findByIdAndUpdate(waitlistEntry._id, { emailSent: true });
+      console.log(`✅ Confirmation email sent`);
+    } else {
+      await Waitlist.findByIdAndUpdate(waitlistEntry._id, { emailError: emailResult.error });
+      console.warn(`⚠️  Email send failed: ${emailResult.error}`);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Welcome to the waitlist! Check your email for confirmation.",
+      entry: waitlistEntry
+    });
+  } catch (err) {
+    console.error("Waitlist submission error:", err.message);
+    res.status(500).json({ error: "Internal server error", details: err.message });
+  }
+}
+
 module.exports = {
   venueSignup,
   venueSignin,
@@ -400,5 +451,6 @@ module.exports = {
   toggleVenueStatus,
   getActiveVenues,
   setPreferredGenres,
-  getPreferredGenres
+  getPreferredGenres,
+  submitWaitlist
 };

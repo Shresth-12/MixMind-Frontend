@@ -4,13 +4,65 @@ import { useInView } from '../hooks/useInView'
 export default function Waitlist() {
   const [submitted, setSubmitted] = useState(false)
   const [ref, isInView] = useInView({ once: true })
+  const [loading, setLoading] = useState(false)
+  const [formData, setFormData] = useState({
+    name: '',
+    venueName: '',
+    email: '',
+    phone: '',
+    venueType: ''
+  })
 
-  const handleSubmit = (e) => {
+  const handleChange = (e) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    setSubmitted(true)
-    setTimeout(() => {
-      setSubmitted(false)
-    }, 4000)
+    setLoading(true)
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/venue/waitlist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to submit waitlist form')
+      }
+
+      const data = await response.json()
+      console.log('✅ Waitlist submission successful:', data)
+
+      // Show success message
+      setSubmitted(true)
+      
+      // Reset form
+      setFormData({
+        name: '',
+        venueName: '',
+        email: '',
+        phone: '',
+        venueType: ''
+      })
+
+      // Hide success message after 4 seconds
+      setTimeout(() => {
+        setSubmitted(false)
+      }, 4000)
+    } catch (err) {
+      console.error('❌ Waitlist submission error:', err)
+      alert('Failed to submit. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -89,34 +141,48 @@ export default function Waitlist() {
             <div className="relative z-10">
               <div className="grid md:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
                 <input 
-                  type="text" 
+                  type="text"
+                  name="name"
                   placeholder="Your name" 
                   className="input-field w-full px-4 sm:px-6 py-4 sm:py-5 rounded-xl font-body text-base sm:text-lg"
+                  value={formData.name}
+                  onChange={handleChange}
                   required
                 />
                 <input 
-                  type="text" 
+                  type="text"
+                  name="venueName"
                   placeholder="Venue name" 
                   className="input-field w-full px-4 sm:px-6 py-4 sm:py-5 rounded-xl font-body text-base sm:text-lg"
+                  value={formData.venueName}
+                  onChange={handleChange}
                   required
                 />
               </div>
               <div className="grid md:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <input 
-                  type="email" 
+                  type="email"
+                  name="email"
                   placeholder="Email address" 
                   className="input-field w-full px-4 sm:px-6 py-4 sm:py-5 rounded-xl font-body text-base sm:text-lg"
+                  value={formData.email}
+                  onChange={handleChange}
                   required
                 />
                 <input 
-                  type="phone" 
+                  type="tel"
+                  name="phone"
                   placeholder="Phone number" 
                   className="input-field w-full px-4 sm:px-6 py-4 sm:py-5 rounded-xl font-body text-base sm:text-lg"
+                  value={formData.phone}
+                  onChange={handleChange}
                   required
                 />
                 <select 
+                  name="venueType"
                   className="input-field w-full px-4 sm:px-6 py-4 sm:py-5 rounded-xl font-body text-base sm:text-lg"
-                  defaultValue=""
+                  value={formData.venueType}
+                  onChange={handleChange}
                   required
                 >
                   <option value="">Venue type</option>
@@ -129,9 +195,11 @@ export default function Waitlist() {
                 </select>
               </div>
               <button 
-                type="submit" 
-                className="glow-button w-full px-6 sm:px-8 py-4 sm:py-5 rounded-full font-display font-bold text-base sm:text-xl transition-all hover:scale-105">
-                Join the Early Access Waitlist →
+                type="submit"
+                disabled={loading}
+                className="glow-button w-full px-6 sm:px-8 py-4 sm:py-5 rounded-full font-display font-bold text-base sm:text-xl transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Submitting...' : 'Join the Early Access Waitlist →'}
               </button>
               <p className="text-xs sm:text-sm mt-3 sm:mt-4 text-center" style={{ color: 'var(--text-secondary)' }}>
                 No commitment required. We'll be in touch soon.

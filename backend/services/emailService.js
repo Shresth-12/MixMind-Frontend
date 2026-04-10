@@ -295,8 +295,192 @@ async function sendGenreRejectionEmail(request, venue, rejectionReason, songTags
   }
 }
 
+/**
+ * Send waitlist confirmation email to venue
+ */
+async function sendWaitlistConfirmation(email, name, venueName) {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: process.env.GMAIL_USER || "noreply@mixmind.co.uk",
+      to: email,
+      subject: "🎵 Welcome to MixMind Early Access Waitlist!",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              background-color: #07070B;
+              color: #ffffff;
+              line-height: 1.6;
+            }
+            .container {
+              max-width: 600px;
+              margin: 0 auto;
+              background: linear-gradient(135deg, #1a0f2e 0%, #140822 100%);
+              border: 2px solid rgba(168, 85, 247, 0.3);
+              border-radius: 12px;
+              padding: 40px;
+              box-shadow: 0 8px 32px rgba(168, 85, 247, 0.1);
+            }
+            .logo {
+              font-weight: bold;
+              font-size: 24px;
+              margin-bottom: 30px;
+              color: #a855f7;
+            }
+            h1 {
+              color: #a855f7;
+              margin: 20px 0;
+              font-size: 28px;
+            }
+            .badge {
+              display: inline-block;
+              background: rgba(168, 85, 247, 0.2);
+              border: 1px solid rgba(168, 85, 247, 0.5);
+              color: #a855f7;
+              padding: 8px 16px;
+              border-radius: 8px;
+              font-weight: bold;
+              margin-bottom: 20px;
+              font-size: 12px;
+              text-transform: uppercase;
+            }
+            .details {
+              background: rgba(168, 85, 247, 0.1);
+              border-left: 4px solid #a855f7;
+              padding: 20px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .detail-row {
+              margin: 10px 0;
+              display: flex;
+              justify-content: space-between;
+            }
+            .label {
+              color: #a855f7;
+              font-weight: bold;
+            }
+            .value {
+              color: #ffffff;
+            }
+            .button {
+              display: inline-block;
+              background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+              color: white;
+              padding: 12px 32px;
+              text-decoration: none;
+              border-radius: 8px;
+              margin: 20px 0;
+              font-weight: bold;
+              transition: all 0.3s ease;
+            }
+            .button:hover {
+              transform: translateY(-2px);
+              box-shadow: 0 8px 20px rgba(168, 85, 247, 0.4);
+            }
+            .footer {
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid rgba(168, 85, 247, 0.2);
+              color: #a895d0;
+              font-size: 12px;
+              text-align: center;
+            }
+            .features {
+              margin: 20px 0;
+              padding: 20px;
+              background: rgba(168, 85, 247, 0.05);
+              border-radius: 8px;
+            }
+            .feature-item {
+              margin: 10px 0;
+              padding-left: 20px;
+            }
+            .feature-item:before {
+              content: "✓ ";
+              color: #a855f7;
+              font-weight: bold;
+              margin-right: 8px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">🎵 MixMind</div>
+            
+            <div class="badge">Early Access Waitlist</div>
+            
+            <h1>You're In! 🎉</h1>
+            
+            <p>Hi <strong>${name}</strong>,</p>
+            
+            <p>Thank you for joining the MixMind early access waitlist! We're thrilled that <strong>${venueName}</strong> is interested in transforming your music experience.</p>
+            
+            <div class="details">
+              <div class="detail-row">
+                <span class="label">Venue:</span>
+                <span class="value">${venueName}</span>
+              </div>
+              <div class="detail-row">
+                <span class="label">Contact Email:</span>
+                <span class="value">${email}</span>
+              </div>
+              <div class="detail-row">
+                <span class="label">Status:</span>
+                <span class="value" style="color: #22e3a1;">Waitlist - Pending Onboarding</span>
+              </div>
+            </div>
+            
+            <p>Here's what happens next:</p>
+            
+            <div class="features">
+              <div class="feature-item">Our team will review your venue</div>
+              <div class="feature-item">We'll reach out to discuss setup and integration</div>
+              <div class="feature-item">You'll get personal onboarding support</div>
+              <div class="feature-item">Your venue goes live with full MixMind features</div>
+            </div>
+            
+            <p><strong>What is MixMind?</strong></p>
+            <p>MixMind is a revolutionary platform that empowers DJs and venues to create seamless, integrated music experiences. From live playlists to automated DJ workflows, we make your venue unforgettable.</p>
+            
+            <p><strong>Questions?</strong><br>
+            Reply to this email or visit our website to learn more about how MixMind can transform your venue.</p>
+            
+            <p style="margin-top: 30px;">See you soon! 🚀</p>
+            
+            <p>Best regards,<br>
+            <strong>The MixMind Team</strong></p>
+            
+            <div class="footer">
+              <p>© 2024 MixMind. All rights reserved.</p>
+              <p>You received this email because you signed up for the MixMind early access waitlist.</p>
+              <p>Get ready to elevate your venue's music experience with MixMind.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ WAITLIST CONFIRMATION email sent to ${email}`);
+    return { success: true, message: "Waitlist confirmation email sent" };
+  } catch (err) {
+    console.error(`❌ Failed to send waitlist confirmation email:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   sendDJAcceptanceEmail,
   sendDJRejectionEmail,
-  sendGenreRejectionEmail
+  sendGenreRejectionEmail,
+  sendWaitlistConfirmation
 };

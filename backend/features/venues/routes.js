@@ -11,12 +11,14 @@ const {
   toggleVenueStatus,
   getActiveVenues,
   setPreferredGenres,
-  getPreferredGenres
+  getPreferredGenres,
+  submitWaitlist
 } = require("./venue.controller");
 
 // Public routes
 router.post("/signup", venueSignup);
 router.post("/signin", venueSignin);
+router.post("/waitlist", submitWaitlist);
 router.get("/public/:venueId", getPublicVenue);
 router.get("/active-venues", getActiveVenues);
 
