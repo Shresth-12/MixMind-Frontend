@@ -328,64 +328,124 @@ async function getActiveVenues(req, res) {
 }
 
 /**
- * Set preferred genres for automix (genre filtering)
+ * Set preferred genres for automix (genre filtering) - ENHANCED with bypass mode
  */
 async function setPreferredGenres(req, res) {
   try {
     const venueId = req.venue.id;
-    const { preferredGenres } = req.body;
+    const { preferredGenres, genreCheckBypass } = req.body;
 
-    if (!Array.isArray(preferredGenres)) {
-      return res.status(400).json({ error: "preferredGenres must be an array" });
-    }
+    console.log(`\n🎵 SET GENRE PREFERENCES`);
+    console.log(`   VenueId: ${venueId}`);
+    console.log(`   Bypass mode: ${genreCheckBypass}`);
+    console.log(`   Genres: ${preferredGenres ? preferredGenres.join(", ") : "none"}`);
 
-    if (preferredGenres.length === 0) {
-      return res.status(400).json({ error: "At least one genre must be provided" });
+    const updateData = {};
+
+    // Handle "All Genres" mode
+    if (genreCheckBypass === true) {
+      updateData.genreCheckBypass = true;
+      updateData.preferredGenres = [];
+      console.log(`   ✅ All genres mode ENABLED`);
+    } else {
+      // Specific genres selected
+      if (!Array.isArray(preferredGenres) || preferredGenres.length === 0) {
+        return res.status(400).json({ error: "Either select specific genres or enable 'All Genres' mode" });
+      }
+      updateData.preferredGenres = preferredGenres;
+      updateData.genreCheckBypass = false;
+      console.log(`   ✅ Specific genres selected: ${preferredGenres.join(", ")}`);
     }
 
     const venue = await Venue.findByIdAndUpdate(
       venueId,
-      { preferredGenres },
+      updateData,
       { new: true }
-    ).select("-password");
+    ).select("preferredGenres genreCheckBypass name");
 
     if (!venue) {
       return res.status(404).json({ error: "Venue not found" });
     }
 
-    console.log(`✅ Preferred genres updated for venue ${venue.name}: ${preferredGenres.join(", ")}`);
+    const status = genreCheckBypass 
+      ? "All genres accepted - no restrictions"
+      : `${(venue.preferredGenres || []).length} genres selected`;
+
+    console.log(`   ✅ Settings saved for ${venue.name}`);
 
     res.json({ 
-      message: "Preferred genres updated successfully",
-      preferredGenres: venue.preferredGenres
+      message: "Genre settings updated successfully",
+      preferredGenres: venue.preferredGenres || [],
+      genreCheckBypass: venue.genreCheckBypass || false,
+      status: status
     });
   } catch (err) {
     console.error("Set Preferred Genres Error:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal server error", details: err.message });
   }
 }
 
 /**
- * Get preferred genres for a venue
+ * Get preferred genres and bypass status 
  */
 async function getPreferredGenres(req, res) {
   try {
     const venueId = req.venue.id;
 
-    const venue = await Venue.findById(venueId).select("preferredGenres");
+    const venue = await Venue.findById(venueId).select("preferredGenres genreCheckBypass");
 
     if (!venue) {
       return res.status(404).json({ error: "Venue not found" });
     }
 
+    let status = "";
+    if (venue.genreCheckBypass) {
+      status = "All genres accepted (bypass enabled)";
+    } else if ((venue.preferredGenres || []).length > 0) {
+      status = `Venue accepts: ${venue.preferredGenres.join(", ")}`;
+    } else {
+      status = "No genres selected - configure preferences";
+    }
+
     res.json({ 
       preferredGenres: venue.preferredGenres || [],
-      message: venue.preferredGenres.length > 0 
-        ? `Venue accepts: ${venue.preferredGenres.join(", ")}`
-        : "No genre restrictions - all genres accepted"
+      genreCheckBypass: venue.genreCheckBypass || false,
+      status: status
     });
   } catch (err) {
     console.error("Get Preferred Genres Error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+/**
+ * Get all available genres
+ */
+function getAvailableGenres(req, res) {
+  try {
+    const availableGenres = [
+      "COMMERCIAL_POP",
+      "POP",
+      "RNB",
+      "US_HIPHOP",
+      "UK_HIPHOP",
+      "AFROBEATS",
+      "DRILL",
+      "ROCK",
+      "INDIE",
+      "HOUSE",
+      "DANCEHALL",
+      "DISCO",
+      "REGGAETON"
+    ];
+
+    res.json({
+      availableGenres: availableGenres,
+      count: availableGenres.length,
+      message: "Select genres or enable 'All Genres' mode"
+    });
+  } catch (err) {
+    console.error("Get Available Genres Error:", err.message);
     res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -452,5 +512,6 @@ module.exports = {
   getActiveVenues,
   setPreferredGenres,
   getPreferredGenres,
+  getAvailableGenres,
   submitWaitlist
 };

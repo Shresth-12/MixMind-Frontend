@@ -56,20 +56,14 @@ connectDB()
     app.listen(PORT, () => {
       console.log(`API server running on port ${PORT}`);
       
-      // Auto-start beatsource queue worker (always needed to process requests)
+      // Auto-start workers
       // Live playlist worker only starts when a venue toggles it ON
       setTimeout(async () => {
         try {
           const Venue = require("./models/Venue");
           
-          // Start beatsource queue worker (processes approved requests)
-          console.log("🚀 Starting Beatsource Queue Worker...");
-          workerManager.startBeatsourceWorker();
-          console.log("✅ Beatsource Queue Worker started");
-          
-          // Start song request queue worker (processes queued song requests sequentially)
-          // NOTE: This worker now runs independently via: npm run dev:worker
-          console.log("🚀 Song Request Queue Worker runs independently (npm run dev:worker)");
+          // Note: Beatsource queue worker no longer needed (using MongoDB instead of Redis/BullMQ)
+          // Song request processing is now handled by: npm run dev:worker (MongoDB-based)
           
           // Check if any venue has live playlist active
           const activeVenue = await Venue.findOne({ livePlaylistActive: true });

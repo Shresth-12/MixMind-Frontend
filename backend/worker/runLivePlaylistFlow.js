@@ -34,23 +34,14 @@ async function waitWithInterrupt(ms) {
   }
 }
 
-// -------------------- SIMPLIFIED LIVE PLAYLIST ROTATION (3-STEP API FLOW) --------------------
+// -------------------- SIMPLIFIED LIVE PLAYLIST ROTATION --------------------
 /**
  * Execute live playlist rotation: Add 5 songs every 6 minutes
- * Cycles through 500 songs (indices 0-499) in the Mixmind folder
- * 
- * API Flow:
- * 1. browser_gotofolder "beatsource:\Mixmind"
- * 2. browser_window "songs"
- * 3. For each of 5 songs:
- *    - browser_scroll i (where i cycles from 0-499)
- *    - playlist_add
- * 4. Wait 6 minutes
- * 5. Repeat
+ * Cycles through songs (indices 0 to totalSongs-1) in the Mixmind folder
  */
 async function simplifiedLivePlaylistRotation(sessionId) {
   const baseUrl = process.env.EXECUTE_API_URL || "http://127.0.0.1:80";
-  const totalSongs = process.env.TOTAL_SONGS || 500;
+  const totalSongs = parseInt(process.env.TOTAL_SONGS) || 94;
   const batchWaitMs = 360000; // 6 minutes = 360,000ms
   const songsPerBatch = 5; // Add 5 songs per batch
   
@@ -66,6 +57,61 @@ async function simplifiedLivePlaylistRotation(sessionId) {
   let currentIndex = 0;
   let batchCount = 0;
   
+  // ===== INITIAL SETUP (ONE TIME AT STARTUP) =====
+  try {
+    console.log(`\n${'─'.repeat(60)}`);
+    console.log(`🚀 INITIAL SETUP`);
+    console.log(`${'─'.repeat(60)}`);
+    
+    // Step 0: Go to Mixmind folder
+    console.log(`📍 Step 0: Going to Mixmind folder...`);
+    const goToFolderScript = `browser_gotofolder "beatport:\\Mixmind"`;
+    const goToFolderUrl = `${baseUrl}/execute?script=${encodeURIComponent(goToFolderScript)}`;
+    
+    try {
+      const goToFolderResponse = await axios.get(goToFolderUrl, { timeout: 10000 });
+      console.log(`✓ Step 0 completed:`, goToFolderResponse.data);
+    } catch (err) {
+      console.error(`✗ Step 0 failed: ${err.message}`);
+      throw new Error(`Go to folder failed: ${err.message}`);
+    }
+    
+    // Step 0B: Select songs window
+    console.log(`📍 Step 0B: Selecting songs window...`);
+    const browserWindowScript = `browser_window "songs"`;
+    const browserWindowUrl = `${baseUrl}/execute?script=${encodeURIComponent(browserWindowScript)}`;
+    
+    try {
+      const browserWindowResponse = await axios.get(browserWindowUrl, { timeout: 10000 });
+      console.log(`✓ Step 0B completed:`, browserWindowResponse.data);
+    } catch (err) {
+      console.error(`✗ Step 0B failed: ${err.message}`);
+      throw new Error(`Browser window selection failed: ${err.message}`);
+    }
+    
+    // Step 0C: Initial scroll to top
+    console.log(`📍 Step 0C: Scrolling to top at startup...`);
+    const scrollTopScript = `browser_focus & browser_scroll -1000`;
+    const scrollTopUrl = `${baseUrl}/execute?script=${encodeURIComponent(scrollTopScript)}`;
+    
+    try {
+      const scrollTopResponse = await axios.get(scrollTopUrl, { timeout: 10000 });
+      console.log(`✓ Step 0C completed (scrolled to top):`, scrollTopResponse.data);
+    } catch (err) {
+      console.error(`✗ Step 0C failed: ${err.message}`);
+      throw new Error(`Initial scroll to top failed: ${err.message}`);
+    }
+    
+    console.log(`✅ Initial setup completed\n`);
+    
+  } catch (setupErr) {
+    console.error(`\n❌ Initial setup failed: ${setupErr.message}`);
+    console.log(`⏳ Waiting 30s before retrying initial setup...`);
+    await waitWithInterrupt(30000);
+    // Don't exit, will retry in next iteration
+  }
+  
+  // ===== MAIN ROTATION LOOP =====
   while (!SHOULD_STOP) {
     batchCount++;
     
@@ -74,68 +120,48 @@ async function simplifiedLivePlaylistRotation(sessionId) {
       console.log(`🎵 BATCH #${batchCount} | Starting Index: ${currentIndex}/${totalSongs - 1}`);
       console.log(`${'─'.repeat(60)}`);
       
-      // Step 1: Go to Mixmind folder
-      console.log(`📍 Step 1: Going to Mixmind folder...`);
-      const goToFolderScript = `browser_gotofolder "beatport:\\Mixmind"`;
-      const goToFolderUrl = `${baseUrl}/execute?script=${encodeURIComponent(goToFolderScript)}`;
+      // 1. Batch start: Reset to absolute top
+      console.log(`📍 Batch Start: Scrolling to top...`);
+      const scrollTopUrl = `${baseUrl}/execute?script=${encodeURIComponent('browser_focus & browser_scroll -1000')}`;
+      await axios.get(scrollTopUrl, { timeout: 10000 });
       
-      try {
-        const goToFolderResponse = await axios.get(goToFolderUrl, { timeout: 10000 });
-        console.log(`✓ Step 1 completed:`, goToFolderResponse.data);
-      } catch (err) {
-        console.error(`✗ Step 1 failed: ${err.message}`);
-        throw new Error(`Go to folder failed: ${err.message}`);
+      // 2. Jump to the starting index for this batch
+      if (currentIndex > 0) {
+        console.log(`📍 Jumping to batch start index: ${currentIndex}...`);
+        const jumpUrl = `${baseUrl}/execute?script=${encodeURIComponent(`browser_focus & browser_scroll +${currentIndex}`)}`;
+        await axios.get(jumpUrl, { timeout: 10000 });
       }
       
-      // Step 1B: Select songs window
-      console.log(`📍 Step 1B: Selecting songs window...`);
-      const browserWindowScript = `browser_window "songs"`;
-      const browserWindowUrl = `${baseUrl}/execute?script=${encodeURIComponent(browserWindowScript)}`;
-      
-      try {
-        const browserWindowResponse = await axios.get(browserWindowUrl, { timeout: 10000 });
-        console.log(`✓ Step 1B completed:`, browserWindowResponse.data);
-      } catch (err) {
-        console.error(`✗ Step 1B failed: ${err.message}`);
-        throw new Error(`Browser window selection failed: ${err.message}`);
-      }
-      
-      // Loop: Add 5 songs
+      // 3. Loop: Add 5 songs, moving down by just 1 each time
       for (let songNum = 1; songNum <= songsPerBatch; songNum++) {
-        // Step 2: Scroll to the current index
-        console.log(`📍 Song ${songNum}/${songsPerBatch} - Step 2: Scrolling to index ${currentIndex}...`);
-        const scrollScript = `browser_scroll ${currentIndex}`;
-        const scrollUrl = `${baseUrl}/execute?script=${encodeURIComponent(scrollScript)}`;
         
-        try {
-          const scrollResponse = await axios.get(scrollUrl, { timeout: 10000 });
-          console.log(`✓ Song ${songNum} Step 2 completed:`, scrollResponse.data);
-        } catch (err) {
-          console.error(`✗ Song ${songNum} Step 2 failed: ${err.message}`);
-          throw new Error(`Scroll failed at song ${songNum}: ${err.message}`);
-        }
+        // Step A: Add current song to playlist
+        console.log(`📍 Song ${songNum}/${songsPerBatch} [Index: ${currentIndex}] - Adding to playlist...`);
+        const addUrl = `${baseUrl}/execute?script=${encodeURIComponent('playlist_add')}`;
+        await axios.get(addUrl, { timeout: 10000 });
         
-        // Step 3: Add song to playlist
-        console.log(`📍 Song ${songNum}/${songsPerBatch} - Step 3: Adding song to playlist...`);
-        const addScript = `playlist_add`;
-        const addUrl = `${baseUrl}/execute?script=${encodeURIComponent(addScript)}`;
-        
-        try {
-          const addResponse = await axios.get(addUrl, { timeout: 10000 });
-          console.log(`✓ Song ${songNum} Step 3 completed:`, addResponse.data);
-        } catch (err) {
-          console.error(`✗ Song ${songNum} Step 3 failed: ${err.message}`);
-          throw new Error(`Add to playlist failed at song ${songNum}: ${err.message}`);
-        }
-        
-        // Increment index and cycle back to 0 when reaching totalSongs
+        // Step B: Calculate next index
         currentIndex = (currentIndex + 1) % totalSongs;
+        
+        // Step C: Move highlight to the next song (if we aren't done with the batch)
+        if (songNum < songsPerBatch) {
+          if (currentIndex === 0) {
+            // If we hit the end of the folder mid-batch, jump back to top
+            console.log(`📍 Reached end of folder, wrapping back to top...`);
+            await axios.get(scrollTopUrl, { timeout: 10000 });
+          } else {
+            // Otherwise, just move down exactly 1 line
+            console.log(`📍 Scrolling down 1 line to next song...`);
+            const scrollDownUrl = `${baseUrl}/execute?script=${encodeURIComponent('browser_focus & browser_scroll +1')}`;
+            await axios.get(scrollDownUrl, { timeout: 10000 });
+          }
+        }
       }
       
       console.log(`✅ Batch #${batchCount} completed successfully (5 songs added)`);
       console.log(`🎵 Next batch will start at index: ${currentIndex}`);
       
-      // Wait 6 minutes before next batch
+      // Wait before next batch
       console.log(`⏳ Waiting ${batchWaitMs / 1000}s (${batchWaitMs / 60000} minutes) before next batch...`);
       await waitWithInterrupt(batchWaitMs);
       
@@ -157,10 +183,6 @@ async function simplifiedLivePlaylistRotation(sessionId) {
 }
 
 // -------------------- MAIN WORKER --------------------
-/**
- * Simplified Live Playlist Worker
- * Uses three-step API flow instead of complex browser automation
- */
 async function livePlaylistWorker(sessionId) {
   console.log(`\n${'═'.repeat(70)}`);
   console.log("🎵 LIVE PLAYLIST WORKER - SIMPLIFIED 3-STEP API ROTATION");
@@ -173,7 +195,6 @@ async function livePlaylistWorker(sessionId) {
   setupSignalHandlers();
 
   try {
-    // Start the simplified 3-step API rotation loop
     await simplifiedLivePlaylistRotation(sessionId);
     console.log("\n✅ Live Playlist Worker completed!");
   } catch (err) {

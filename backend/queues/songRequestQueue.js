@@ -1,10 +1,31 @@
-const { Queue } = require("bullmq");
+/**
+ * Song Request Queue - MOCK version (no Redis needed)
+ * Job queuing now handled via MongoDB stackService
+ */
 
-const connection = {
-  host: process.env.REDIS_HOST || "127.0.0.1",
-  port: Number(process.env.REDIS_PORT) || 6379
-};
+class MockQueue {
+  constructor(name) {
+    this.name = name;
+  }
 
-const songRequestQueue = new Queue("song-requests", { connection });
+  async add(jobName, jobData) {
+    console.log(`✅ [${this.name}] Job queued: ${jobName}`);
+    return { id: Date.now().toString(), ...jobData };
+  }
 
+  async getCountsPerStatus() {
+    return { waiting: 0, active: 0, completed: 0, failed: 0 };
+  }
+
+  async getJobCounts() {
+    return { waiting: 0, active: 0, completed: 0, failed: 0 };
+  }
+
+  async getActiveCount() { return 0; }
+  async getWaitingCount() { return 0; }
+  async getFailedCount() { return 0; }
+  async getCompletedCount() { return 0; }
+}
+
+const songRequestQueue = new MockQueue("song-requests");
 module.exports = songRequestQueue;

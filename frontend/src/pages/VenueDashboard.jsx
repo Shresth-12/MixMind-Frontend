@@ -24,6 +24,36 @@ export default function VenueDashboard() {
   const [preferredGenres, setPreferredGenres] = useState([]);
   const [selectedGenres, setSelectedGenres] = useState([]);
   const [savingGenres, setSavingGenres] = useState(false);
+  const [genreCheckBypass, setGenreCheckBypass] = useState(false);
+  const [availableGenres] = useState([
+    "COMMERCIAL_POP",
+    "POP",
+    "RNB",
+    "US_HIPHOP",
+    "UK_HIPHOP",
+    "AFROBEATS",
+    "DRILL",
+    "ROCK",
+    "INDIE",
+    "HOUSE",
+    "DANCEHALL",
+    "DISCO",
+    "REGGAETON",
+    "HIP HOP",
+    "80S",
+    "90S",
+    "CHEESE",
+    "2000S",
+    "GIRLS",
+    "SINGALONG",
+    "COMMERCIAL",
+    "EDM",
+    "TECHHOUSE",
+    "TECHNO",
+    "FUNK",
+    "70S",
+    "SOUL"
+  ]);
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -374,7 +404,9 @@ export default function VenueDashboard() {
         const data = await response.json();
         setPreferredGenres(data.preferredGenres || []);
         setSelectedGenres(data.preferredGenres || []);
+        setGenreCheckBypass(data.genreCheckBypass || false);
         console.log("📊 Preferred genres:", data.preferredGenres);
+        console.log("🔓 Genre check bypass:", data.genreCheckBypass);
       }
     } catch (err) {
       console.error("Failed to fetch genres:", err);
@@ -383,8 +415,10 @@ export default function VenueDashboard() {
 
   const handleSaveGenres = async () => {
     const token = localStorage.getItem("venueToken");
-    if (selectedGenres.length === 0) {
-      setError("Please select at least one genre");
+    
+    // Validation: Either select genres OR enable "All Genres"
+    if (!genreCheckBypass && selectedGenres.length === 0) {
+      setError("Please select at least one genre or enable 'All Genres'");
       return;
     }
 
@@ -393,13 +427,17 @@ export default function VenueDashboard() {
     setSuccessMsg("");
 
     try {
+      const payload = genreCheckBypass 
+        ? { genreCheckBypass: true }
+        : { preferredGenres: selectedGenres, genreCheckBypass: false };
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/venue/genres/set`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ preferredGenres: selectedGenres })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -407,9 +445,15 @@ export default function VenueDashboard() {
       }
 
       const data = await response.json();
-      setPreferredGenres(selectedGenres);
-      setSuccessMsg(`✅ Genres updated: ${selectedGenres.join(", ")}`);
-      console.log("✅ Genres saved:", selectedGenres);
+      setPreferredGenres(data.preferredGenres || []);
+      setGenreCheckBypass(data.genreCheckBypass || false);
+      
+      const msg = data.genreCheckBypass 
+        ? "✅ All genres enabled - Songs accepted without restriction"
+        : `✅ Genres updated: ${data.preferredGenres.join(", ")}`;
+      
+      setSuccessMsg(msg);
+      console.log("✅ Genres saved:", payload);
     } catch (err) {
       setError(err.message || "Failed to save genres");
     } finally {
@@ -427,6 +471,18 @@ export default function VenueDashboard() {
     });
   };
 
+  const handleAllGenres = () => {
+    if (genreCheckBypass) {
+      // Disable "All Genres" - reset to empty
+      setGenreCheckBypass(false);
+      setSelectedGenres([]);
+    } else {
+      // Enable "All Genres" - bypass all checks
+      setGenreCheckBypass(true);
+      setSelectedGenres([]);
+    }
+  };
+
   // Fetch genres on component mount
   useEffect(() => {
     const token = localStorage.getItem("venueToken");
@@ -434,31 +490,6 @@ export default function VenueDashboard() {
       fetchPreferredGenres(token);
     }
   }, []);
-
-  const availableGenres = [
-    "Electronic",
-    "House",
-    "Techno",
-    "EDM",
-    "Deep House",
-    "Trance",
-    "Dubstep",
-    "Drum and Bass",
-    "Ambient",
-    "Hip-Hop",
-    "Rap",
-    "Pop",
-    "Rock",
-    "Indie",
-    "Alternative",
-    "Metal",
-    "Jazz",
-    "Soul",
-    "R&B",
-    "Reggae",
-    "Latin",
-    "Afrobeats"
-  ];
 
   if (loading) {
     return (
@@ -699,7 +730,12 @@ export default function VenueDashboard() {
             </p>
 
             {/* Current Genres Display */}
-            {preferredGenres.length > 0 && (
+            {genreCheckBypass ? (
+              <div className="mb-6 p-4 bg-green-600/20 border border-green-500/40 rounded-lg">
+                <p className="text-green-300 font-semibold">✅ All Genres Mode</p>
+                <p className="text-sm text-green-200">All songs will be accepted without genre restrictions</p>
+              </div>
+            ) : preferredGenres.length > 0 ? (
               <div className="mb-6">
                 <p className="text-sm text-gray-300 mb-3">Currently Selected:</p>
                 <div className="flex flex-wrap gap-2">
@@ -710,42 +746,65 @@ export default function VenueDashboard() {
                   ))}
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {/* Genre Selection Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
-              {availableGenres.map(genre => (
-                <label key={genre} className="flex items-center gap-2 cursor-pointer p-3 rounded-lg hover:bg-white/5 transition-all">
-                  <input
-                    type="checkbox"
-                    checked={selectedGenres.includes(genre)}
-                    onChange={() => handleGenreToggle(genre)}
-                    className="w-4 h-4 accent-blue-600 cursor-pointer"
-                  />
-                  <span className="text-white text-sm">{genre}</span>
-                </label>
-              ))}
+            {/* Mode Selection */}
+            <div className="mb-6 flex gap-4">
+              <button
+                onClick={handleAllGenres}
+                className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-all border-2 ${
+                  genreCheckBypass
+                    ? "bg-green-600/20 border-green-500 text-green-300"
+                    : "bg-gray-700/30 border-gray-600 text-gray-300 hover:bg-gray-600/30"
+                }`}
+              >
+                {genreCheckBypass ? "✓ All Genres Enabled" : "Enable All Genres"}
+              </button>
             </div>
+
+            {/* Genre Selection Grid (only show if not in bypass mode) */}
+            {!genreCheckBypass && (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
+                  {availableGenres.map(genre => (
+                    <label key={genre} className="flex items-center gap-2 cursor-pointer p-3 rounded-lg hover:bg-white/5 transition-all">
+                      <input
+                        type="checkbox"
+                        checked={selectedGenres.includes(genre)}
+                        onChange={() => handleGenreToggle(genre)}
+                        className="w-4 h-4 accent-blue-600 cursor-pointer"
+                      />
+                      <span className="text-white text-sm">{genre}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
 
             {/* Save Button */}
             <button
               onClick={handleSaveGenres}
-              disabled={savingGenres || selectedGenres.length === 0}
+              disabled={savingGenres || (!genreCheckBypass && selectedGenres.length === 0)}
               className={`w-full px-6 py-3 rounded-lg font-semibold transition-all ${
                 savingGenres
                   ? "bg-blue-600/50 cursor-not-allowed opacity-50"
-                  : selectedGenres.length === 0
+                  : !genreCheckBypass && selectedGenres.length === 0
                   ? "bg-gray-600 cursor-not-allowed opacity-50"
                   : "bg-blue-600 hover:bg-blue-700 text-white"
               }`}
             >
-              {savingGenres ? "Saving..." : "Save Genre Preferences"}
+              {savingGenres ? "Saving..." : "Save Genre Settings"}
             </button>
 
             {/* Info Message */}
-            {selectedGenres.length === 0 && preferredGenres.length === 0 && (
+            {!genreCheckBypass && selectedGenres.length === 0 && (
               <p className="text-sm text-yellow-400 mt-4">
-                ⚠️ No genres selected. Song requests will be accepted regardless of genre (only limited by DJ Mode if enabled).
+                ⚠️ No genres selected. Click "Enable All Genres" to accept all songs, or select specific genres.
+              </p>
+            )}
+            {genreCheckBypass && (
+              <p className="text-sm text-green-400 mt-4">
+                ✅ All genres mode enabled. All song requests will be accepted without genre restrictions.
               </p>
             )}
           </div>

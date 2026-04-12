@@ -12,9 +12,34 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/* -------------------- UTILITY: Check if song is essential -------------------- */
+function isEssentialSong(songName, artistName) {
+  const essentialSongs = [
+    { name: "Happy Birthday", artist: "Stevie Wonder" },
+    { name: "In Da Club", artist: "50 Cent" }
+  ];
+  
+  return essentialSongs.some(s => 
+    s.name.toLowerCase() === songName.toLowerCase() && 
+    s.artist.toLowerCase() === artistName.toLowerCase()
+  );
+}
+
 /* -------------------- GENRE VALIDATION AND PROCESSING -------------------- */
 async function validateAndProcessSong(requestData, venue) {
   try {
+    // STEP 1: Check if Genre Check is Bypassed (All Genres mode)
+    if (venue.genreCheckBypass) {
+      console.log(`✅ Genre Check Bypassed - "All Genres" mode enabled`);
+      return { isValid: true, reason: "Genre check bypassed - All genres mode" };
+    }
+
+    // STEP 2: Check if song is Essential (e.g., Birthday songs)
+    if (isEssentialSong(requestData.title, requestData.artist)) {
+      console.log(`✅ Essential Song - Auto-pass (Birthday songs, etc.)`);
+      return { isValid: true, reason: "Essential song - auto-approved" };
+    }
+
     // If no preferred genres configured, accept all songs
     if (!venue.preferredGenres || venue.preferredGenres.length === 0) {
       console.log(`\n✅ No genre restrictions for venue - processing song`);
@@ -23,19 +48,60 @@ async function validateAndProcessSong(requestData, venue) {
 
     console.log(`\n🔍 GENRE VALIDATION - Checking against venue genres: ${venue.preferredGenres.join(", ")}`);
 
-    // Validate song genre using Last.fm tags
+    // STEP 3: Check against Song Database
+    const songDB = require("../data/songDatabase.json");
+    const dbSong = songDB.find(s => 
+      s.name.toLowerCase() === requestData.title.toLowerCase() && 
+      s.artist.toLowerCase() === requestData.artist.toLowerCase()
+    );
+
+    if (dbSong) {
+      console.log(`📊 Song found in database`);
+      const allGenres = [dbSong.genre, ...dbSong.secondary];
+      // Case-insensitive genre matching
+      const matchesGenre = allGenres.some(g => 
+        venue.preferredGenres.map(vg => vg.toUpperCase()).includes(g.toUpperCase())
+      );
+      
+      if (matchesGenre) {
+        console.log(`✅ Genre match - Song genres match venue preferences`);
+        console.log(`   Song genres: ${allGenres.join(", ")}`);
+        console.log(`   Venue genres: ${venue.preferredGenres.join(", ")}`);
+        return { isValid: true, reason: "Database genre match", source: "database" };
+      } else {
+        console.log(`❌ Genre mismatch - Database entry`);
+        console.log(`   Song genres: ${allGenres.join(", ")}`);
+        console.log(`   Venue genres: ${venue.preferredGenres.join(", ")}`);
+        return {
+          isValid: false,
+          reason: `Song genres (${allGenres.join(", ")}) don't match venue genres (${venue.preferredGenres.join(", ")})`,
+          source: "database",
+          songTags: allGenres,
+          venueGenres: venue.preferredGenres
+        };
+      }
+    }
+
+    // STEP 4: Fall back to Last.fm if not in database
+    console.log(`🔗 Song not in database - Checking Last.fm...`);
     const genreValidation = await validateSongGenre(
       requestData.title,
       requestData.artist,
       venue.preferredGenres
     );
 
-    if (genreValidation.isValid) {
-      console.log(`✅ GENRE VALID - Matched tag: "${genreValidation.matchedTag}"`);
-      return { isValid: true, matchedTag: genreValidation.matchedTag };
+    // STEP 5: No tags on Last.fm - auto pass for safety
+    if (genreValidation.tags.length === 0) {
+      console.log(`⏭️  No Last.fm tags found - Auto-pass (STEP 5)`);
+      return { isValid: true, reason: "No genre data available - auto-approved", source: "nodata" };
     }
 
-    // Genre validation failed
+    if (genreValidation.isValid) {
+      console.log(`✅ GENRE VALID - Matched tag: "${genreValidation.matchedTag}"`);
+      return { isValid: true, matchedTag: genreValidation.matchedTag, source: "lastfm" };
+    }
+
+    // Genre validation failed with tags present
     console.log(`❌ GENRE VALIDATION FAILED`);
     console.log(`   Reason: ${genreValidation.reason}`);
 
@@ -43,13 +109,17 @@ async function validateAndProcessSong(requestData, venue) {
       isValid: false,
       reason: genreValidation.reason,
       songTags: genreValidation.tags,
-      venueGenres: venue.preferredGenres
+      venueGenres: venue.preferredGenres,
+      source: "lastfm"
     };
   } catch (err) {
     console.error(`❌ Genre validation error:`, err.message);
+    // STEP 5: Auto-pass on error for safety
+    console.log(`⏭️  Genre validation error - Auto-pass for safety`);
     return {
-      isValid: false,
-      reason: `Genre validation error: ${err.message}`
+      isValid: true,
+      reason: `Auto-pass due to validation error: ${err.message}`,
+      source: "error"
     };
   }
 }

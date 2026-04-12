@@ -24,8 +24,27 @@ const VenueSchema = new Schema(
     djMode: { type: Boolean, default: false },
     djPassword: { type: String },
     
-    // Preferred genres for automix (when DJ mode is OFF)
-    preferredGenres: { type: [String], default: [] },
+    // Genre Management System
+    preferredGenres: {
+      type: [String],
+      enum: [
+        "COMMERCIAL_POP",
+        "POP",
+        "RNB",
+        "US_HIPHOP",
+        "UK_HIPHOP",
+        "AFROBEATS",
+        "DRILL",
+        "ROCK",
+        "INDIE",
+        "HOUSE",
+        "DANCEHALL",
+        "DISCO",
+        "REGGAETON"
+      ],
+      default: []
+    },
+    genreCheckBypass: { type: Boolean, default: false }, // "All Genres" mode - pass all songs
     
     // Revenue tracking - ONLY captured payments count
     totalRevenue: { type: Number, default: 0 },

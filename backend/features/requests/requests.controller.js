@@ -16,6 +16,17 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/* -------------------- UTILITY: CHECK IF SONG IS ESSENTIAL -------------------- */
+function isEssentialSong(songName, artistName) {
+  const songDB = require("../../data/songDatabase.json");
+  const essential = songDB.find(s => 
+    s.essential === true &&
+    s.name.toLowerCase() === songName.toLowerCase() && 
+    s.artist.toLowerCase() === artistName.toLowerCase()
+  );
+  return !!essential;
+}
+
 /* -------------------- CREATE REQUEST -------------------- */
 async function createRequest(req, res) {
   try {
@@ -218,83 +229,207 @@ async function createRequest(req, res) {
       }
     }
 
-    // ===== GENRE FILTERING ONLY WHEN LIVE PLAYLIST IS ON =====
-    // Genre filtering only applies when: Live Playlist ON + DJ OFF
-    if (livePlaylistActive && !djModeEnabled && venue && venue.preferredGenres && venue.preferredGenres.length > 0) {
-      console.log(`\n🔎 GENRE CHECK (Live Playlist enabled using Last.fm tags):`);
-      try {
-        console.log(`🎵 Validating genre for: "${songName}" by "${artistName_}"...`);
-        
-        // Validate song using Last.fm tags
-        const genreValidation = await validateSongGenre(songName, artistName_, venue.preferredGenres);
-
-        if (!genreValidation.isValid) {
-          console.log(`❌ Genre mismatch - Request ID: ${request._id}`);
-          console.log(`   Song tags: ${genreValidation.tags.join(", ")}`);
-          console.log(`   Venue genres: ${venue.preferredGenres.join(", ")}`);
-          console.log(`   Reason: ${genreValidation.reason}`);
-          
-          // Update request with genre rejection
-          await Request.findByIdAndUpdate(request._id, { 
-            status: "rejected",
-            rejectionReason: genreValidation.reason,
-            genreCheckPassed: false,
-            detectedTags: genreValidation.tags
-          });
-          
-          // Send rejection email
-          try {
-            const populatedRequest = await Request.findById(request._id).populate("userId");
-            if (populatedRequest && populatedRequest.userId && populatedRequest.userId.email) {
-              await sendGenreRejectionEmail(
-                populatedRequest,
-                venue,
-                genreValidation.reason,
-                genreValidation.tags
-              );
-              console.log(`📧 Genre rejection email sent to ${populatedRequest.userId.email}`);
-            }
-          } catch (emailErr) {
-            console.error(`⚠️  Failed to send rejection email:`, emailErr.message);
-          }
-
-          return res.status(400).json({ 
-            error: "Genre mismatch",
-            message: genreValidation.reason,
-            songTags: genreValidation.tags,
-            venueGenres: venue.preferredGenres,
-            requestId: request._id
-          });
-        }
-
-        // Genre matches, update request document for reference
+    // ===== GENRE FILTERING LOGIC =====
+    // Applies only when: Live Playlist ON + DJ OFF + Genre preferences set
+    try {
+      console.log(`\n[DEBUG] Genre check conditions - livePlaylistActive: ${livePlaylistActive}, djModeEnabled: ${djModeEnabled}, venue exists: ${!!venue}`);
+      
+      if (livePlaylistActive && !djModeEnabled && venue) {
+        console.log(`\n🔎 GENRE CHECK SYSTEM:`);
+      
+      // STEP 1: Check if Genre Check is Bypassed (All Genres mode)
+      if (venue.genreCheckBypass) {
+        console.log(`✅ Genre Check Bypassed - "All Genres" mode enabled`);
+        console.log(`   All songs will pass without genre validation`);
         await Request.findByIdAndUpdate(request._id, { 
-          metadata: { 
-            tags: genreValidation.tags,
-            matchedTag: genreValidation.matchedTag
-          },
           genreCheckPassed: true,
-          detectedTags: genreValidation.tags
+          detectedTags: ["BYPASS"],
+          metadata: { note: "Genre check bypassed - All genres mode" }
         });
-
-        console.log(`✅ Genre match confirmed - "${genreValidation.matchedTag}" matches venue genres`);
-      } catch (genreErr) {
-        console.error(`❌ GENRE VALIDATION ERROR: ${genreErr.message}`);
-        
-        // If genre validation fails, still allow the request (fallback)
-        console.warn(`⚠️  Genre validation failed, allowing request to proceed as fallback`);
-        
+      } 
+      // STEP 2: Check if song is Essential (e.g., Birthday songs)
+      else if (isEssentialSong(songName, artistName_)) {
+        console.log(`✅ Essential Song - Auto-pass (Birthday songs, etc.)`);
+        console.log(`   Song: "${songName}" by "${artistName_}"`);
         await Request.findByIdAndUpdate(request._id, { 
           genreCheckPassed: true,
-          metadata: { 
-            genreCheckWarning: genreErr.message
-          }
+          detectedTags: ["ESSENTIAL"],
+          metadata: { note: "Essential song - auto-approved" }
         });
       }
-    } else if (livePlaylistActive) {
-      console.log(`\n✅ LIVE PLAYLIST ON - No genre filtering configured`);
-    } else {
-      console.log(`\n⏭️  GENRE CHECK SKIPPED - DJ mode pending approval`);
+      // STEP 3: Check against Song Database
+      else if (venue.preferredGenres && venue.preferredGenres.length > 0) {
+        console.log(`🎵 Validating genre for: "${songName}" by "${artistName_}"...`);
+        
+        const songDB = require("../../data/songDatabase.json");
+        console.log(`📖 Database has ${songDB.length} songs. Searching for: "${songName}" / "${artistName_}"`);
+        
+        const dbSong = songDB.find(s => {
+          const nameMatch = s.name.toLowerCase() === songName.toLowerCase();
+          const artistMatch = s.artist.toLowerCase() === artistName_.toLowerCase();
+          console.log(`   Checking: "${s.name}" / "${s.artist}" → name:${nameMatch}, artist:${artistMatch}`);
+          return nameMatch && artistMatch;
+        });
+
+        if (dbSong) {
+          console.log(`📊 Song found in database`);
+          const allGenres = [dbSong.genre, ...dbSong.secondary];
+          // Case-insensitive genre matching
+          const matchesGenre = allGenres.some(g => 
+            venue.preferredGenres.map(vg => vg.toUpperCase()).includes(g.toUpperCase())
+          );
+          
+          if (matchesGenre) {
+            console.log(`✅ Genre match - Song genres match venue preferences`);
+            console.log(`   Song genres: ${allGenres.join(", ")}`);
+            console.log(`   Venue genres: ${venue.preferredGenres.join(", ")}`);
+            await Request.findByIdAndUpdate(request._id, { 
+              genreCheckPassed: true,
+              detectedTags: allGenres,
+              metadata: { 
+                source: "database",
+                matchedGenres: allGenres.filter(g => 
+                  venue.preferredGenres.map(vg => vg.toUpperCase()).includes(g.toUpperCase())
+                )
+              }
+            });
+          } else {
+            console.log(`❌ Genre mismatch - Database entry`);
+            console.log(`   Song genres: ${allGenres.join(", ")}`);
+            console.log(`   Venue genres: ${venue.preferredGenres.join(", ")}`);
+            
+            await Request.findByIdAndUpdate(request._id, { 
+              status: "rejected",
+              rejectionReason: "Genre mismatch",
+              genreCheckPassed: false,
+              detectedTags: allGenres,
+              metadata: { source: "database" }
+            });
+
+            try {
+              const populatedRequest = await Request.findById(request._id).populate("userId");
+              if (populatedRequest && populatedRequest.userId && populatedRequest.userId.email) {
+                await sendGenreRejectionEmail(
+                  populatedRequest,
+                  venue,
+                  "Song genre doesn't match your venue's preferred genres",
+                  allGenres
+                );
+              }
+            } catch (emailErr) {
+              console.error(`⚠️  Failed to send rejection email:`, emailErr.message);
+            }
+
+            return res.status(400).json({ 
+              error: "Genre mismatch",
+              message: "Song genre doesn't match venue's preferred genres",
+              songGenres: allGenres,
+              venueGenres: venue.preferredGenres,
+              venueCanAccept: venue.preferredGenres,
+              requestId: request._id
+            });
+          }
+        } 
+        // STEP 4: Fall back to Last.fm if not in database
+        else {
+          console.log(`🔗 Song not in database - Checking Last.fm...`);
+          try {
+            const genreValidation = await validateSongGenre(songName, artistName_, venue.preferredGenres);
+
+            // STEP 5: No tags on Last.fm - auto pass for safety
+            if (genreValidation.tags.length === 0) {
+              console.log(`⏭️  No Last.fm tags found - Auto-pass (STEP 5)`);
+              await Request.findByIdAndUpdate(request._id, { 
+                genreCheckPassed: true,
+                detectedTags: [],
+                metadata: { 
+                  source: "nodata",
+                  note: "No genre data available - auto-approved"
+                }
+              });
+            } else if (genreValidation.isValid) {
+              // Last.fm tags match
+              console.log(`✅ Genre match - Last.fm tags match venue preferences`);
+              await Request.findByIdAndUpdate(request._id, { 
+                genreCheckPassed: true,
+                detectedTags: genreValidation.tags,
+                metadata: { 
+                  source: "lastfm",
+                  matchedTag: genreValidation.matchedTag
+                }
+              });
+            } else {
+              // Genre validation failed with tags present
+              console.log(`❌ Genre mismatch - Last.fm tags`);
+              console.log(`   Song tags: ${genreValidation.tags.join(", ")}`);
+              console.log(`   Venue genres: ${venue.preferredGenres.join(", ")}`);
+              
+              await Request.findByIdAndUpdate(request._id, { 
+                status: "rejected",
+                rejectionReason: genreValidation.reason,
+                genreCheckPassed: false,
+                detectedTags: genreValidation.tags,
+                metadata: { source: "lastfm" }
+              });
+
+              try {
+                const populatedRequest = await Request.findById(request._id).populate("userId");
+                if (populatedRequest && populatedRequest.userId && populatedRequest.userId.email) {
+                  await sendGenreRejectionEmail(
+                    populatedRequest,
+                    venue,
+                    genreValidation.reason,
+                    genreValidation.tags
+                  );
+                }
+              } catch (emailErr) {
+                console.error(`⚠️  Failed to send rejection email:`, emailErr.message);
+              }
+
+              return res.status(400).json({ 
+                error: "Genre mismatch",
+                message: genreValidation.reason,
+                songTags: genreValidation.tags,
+                venueGenres: venue.preferredGenres,
+                venueCanAccept: venue.preferredGenres,
+                requestId: request._id
+              });
+            }
+          } catch (lastfmErr) {
+            console.error(`⚠️  Last.fm validation error:`, lastfmErr.message);
+            // Auto-pass on error
+            console.log(`⏭️  Last.fm error - Auto-pass for safety`);
+            await Request.findByIdAndUpdate(request._id, { 
+              genreCheckPassed: true,
+              metadata: { 
+                source: "error",
+                note: "Last.fm lookup failed - auto-approved"
+              }
+            });
+          }
+        }
+
+        console.log(`✅ Genre validation complete - Request approved to continue`);
+      } else {
+        console.log(`⏭️  No preferred genres set - Skipping genre check`);
+      }
+      } else if (livePlaylistActive) {
+        console.log(`\n✅ LIVE PLAYLIST ON - No genre filtering configured`);
+      } else {
+        console.log(`\n⏭️  GENRE CHECK SKIPPED - DJ mode pending approval`);
+      }
+    } catch (genreErr) {
+      console.error(`❌ GENRE VALIDATION ERROR: ${genreErr.message}`);
+      
+      // If genre validation fails, still allow the request (fallback)
+      console.warn(`⚠️  Genre validation failed, allowing request to proceed as fallback`);
+      
+      await Request.findByIdAndUpdate(request._id, { 
+        genreCheckPassed: true,
+        metadata: { 
+          genreCheckWarning: genreErr.message
+        }
+      });
     }
 
     // ===== LIFO STACK PROCESSING FOR LIVE PLAYLIST =====

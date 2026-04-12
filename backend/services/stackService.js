@@ -1,162 +1,184 @@
-const Redis = require("ioredis");
-
-// Initialize Redis client
-const redis = new Redis({
-  host: process.env.REDIS_HOST || "localhost",
-  port: process.env.REDIS_PORT || 6379
-});
+const Request = require("../models/Request");
 
 /**
  * Stack Service for managing LIFO queues per venue
- * Uses Redis for persistent stack storage
+ * Uses MongoDB instead of Redis - queries Request collection directly
+ * Status "queued" = items in queue (sorted by createdAt DESC for LIFO)
  */
 
 /**
  * Push a song request onto the venue's stack (LIFO)
+ * Note: Request is already created in DB, just needs to be "queued"
  * @param {string} venueId - Venue ID
- * @param {object} requestData - Request data to push
+ * @param {object} requestData - Request data (for logging only, actual data is in DB)
  */
 async function pushToStack(venueId, requestData) {
   try {
-    const stackKey = `automix:stack:${venueId}`;
-    const requestJSON = JSON.stringify(requestData);
+    // Find the request in DB and ensure it's marked as queued
+    const request = await Request.findById(requestData._id);
     
-    // LPUSH adds to the left (beginning) of the list
-    // RPOP removes from the right (end) for true LIFO (newest first)
-    await redis.lpush(stackKey, requestJSON);
+    if (!request) {
+      return { success: false, error: "Request not found in database" };
+    }
     
-    console.log(`📥 Added to stack: ${stackKey}`);
+    // Ensure status is "queued"
+    if (request.status !== "queued") {
+      request.status = "queued";
+      request.flowStatus = "queued";
+      await request.save();
+    }
+    
+    console.log(`📥 Added to queue: ${venueId}`);
     console.log(`   Song: ${requestData.title} by ${requestData.artist}`);
     console.log(`   Request ID: ${requestData._id}`);
     
-    // Set expiration: 24 hours
-    await redis.expire(stackKey, 86400);
-    
-    return { success: true, message: "Request added to stack" };
+    return { success: true, message: "Request added to queue" };
   } catch (err) {
-    console.error(`❌ Error pushing to stack:`, err.message);
+    console.error(`❌ Error pushing to queue:`, err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Pop from the venue's stack (LIFO - gets most recent/last added)
+ * Pop from the venue's queue (LIFO - gets most recent/last added)
  * @param {string} venueId - Venue ID
  */
 async function popFromStack(venueId) {
   try {
-    const stackKey = `automix:stack:${venueId}`;
+    // Find the MOST RECENT queued request (LIFO: sort by createdAt DESC, take first)
+    const request = await Request.findOne({ 
+      venueId: venueId, 
+      status: "queued" 
+    }).sort({ createdAt: -1 });
     
-    // LPOP removes from the left (beginning after LPUSH) - LIFO order (newest first)
-    const requestJSON = await redis.lpop(stackKey);
-    
-    if (!requestJSON) {
-      console.log(`📭 Stack is empty for venue: ${venueId}`);
-      return { success: true, data: null, message: "Stack is empty" };
+    if (!request) {
+      console.log(`📭 Queue is empty for venue: ${venueId}`);
+      return { success: true, data: null, message: "Queue is empty" };
     }
     
-    const requestData = JSON.parse(requestJSON);
+    // Convert to plain object matching the old Redis format
+    const requestData = {
+      _id: request._id.toString(),
+      title: request.title || request.songTitle,
+      artist: request.artist || request.artistName,
+      price: request.price,
+      userId: request.userId.toString(),
+      userName: request.userName,
+      createdAt: request.createdAt,
+      checkoutSessionId: request.checkoutSessionId || null,
+      paymentStatus: request.paymentStatus || null
+    };
     
-    console.log(`📤 Popped from stack: ${stackKey}`);
+    console.log(`📤 Popped from queue: ${venueId}`);
     console.log(`   Song: ${requestData.title} by ${requestData.artist}`);
     console.log(`   Request ID: ${requestData._id}`);
     
     return { success: true, data: requestData };
   } catch (err) {
-    console.error(`❌ Error popping from stack:`, err.message);
+    console.error(`❌ Error popping from queue:`, err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Remove a specific request from the stack
+ * Remove a specific request from the queue
  * @param {string} venueId - Venue ID
  * @param {string} requestId - Request ID to remove
  */
 async function removeFromStack(venueId, requestId) {
   try {
-    const stackKey = `automix:stack:${venueId}`;
+    const request = await Request.findOne({ 
+      _id: requestId, 
+      venueId: venueId, 
+      status: "queued" 
+    });
     
-    // Get all items in the stack
-    const stackItems = await redis.lrange(stackKey, 0, -1);
-    
-    let removed = false;
-    for (const item of stackItems) {
-      const requestData = JSON.parse(item);
-      if (requestData._id === requestId) {
-        // Found it, remove this item
-        await redis.lrem(stackKey, 1, item);
-        removed = true;
-        console.log(`🗑️  Removed request from stack: ${requestId}`);
-        break;
-      }
+    if (!request) {
+      console.log(`⚠️  Request not found in queue: ${requestId}`);
+      return { success: true, message: "Request not found in queue" };
     }
     
-    if (!removed) {
-      console.log(`⚠️  Request not found in stack: ${requestId}`);
-      return { success: true, message: "Request not found in stack" };
-    }
+    // Update status to something other than "queued"
+    request.status = "rejected";
+    request.flowStatus = "removed";
+    await request.save();
     
-    return { success: true, message: "Request removed from stack" };
+    console.log(`🗑️  Removed request from queue: ${requestId}`);
+    return { success: true, message: "Request removed from queue" };
   } catch (err) {
-    console.error(`❌ Error removing from stack:`, err.message);
+    console.error(`❌ Error removing from queue:`, err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Get stack size (number of requests waiting)
+ * Get queue size (number of queued requests)
  * @param {string} venueId - Venue ID
  */
 async function getStackSize(venueId) {
   try {
-    const stackKey = `automix:stack:${venueId}`;
-    const size = await redis.llen(stackKey);
+    const size = await Request.countDocuments({ 
+      venueId: venueId, 
+      status: "queued" 
+    });
     
-    console.log(`📊 Stack size for venue ${venueId}: ${size}`);
+    console.log(`📊 Queue size for venue ${venueId}: ${size}`);
     return { success: true, data: size };
   } catch (err) {
-    console.error(`❌ Error getting stack size:`, err.message);
+    console.error(`❌ Error getting queue size:`, err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Peek at the stack (see what's next without removing)
+ * Peek at the queue (see what's next without removing)
  * @param {string} venueId - Venue ID
  * @param {number} count - Number of items to peek (default 5)
  */
 async function peekStack(venueId, count = 5) {
   try {
-    const stackKey = `automix:stack:${venueId}`;
+    // Get the next N queued requests (LIFO: most recent first)
+    const requests = await Request.find({ 
+      venueId: venueId, 
+      status: "queued" 
+    })
+      .sort({ createdAt: -1 })
+      .limit(count)
+      .lean();
     
-    // LRANGE from 0 to -1 gets all items in order (most recent first)
-    const stackItems = await redis.lrange(stackKey, 0, count - 1);
+    const items = requests.map(r => ({
+      _id: r._id.toString(),
+      title: r.title || r.songTitle,
+      artist: r.artist || r.artistName,
+      price: r.price,
+      createdAt: r.createdAt
+    }));
     
-    const items = stackItems.map(item => JSON.parse(item));
-    
-    console.log(`👁️  Peeking at stack for venue ${venueId}: ${items.length} items`);
+    console.log(`👁️  Peeking at queue for venue ${venueId}: ${items.length} items`);
     
     return { success: true, data: items };
   } catch (err) {
-    console.error(`❌ Error peeking stack:`, err.message);
+    console.error(`❌ Error peeking queue:`, err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Clear entire stack for a venue
+ * Clear entire queue for a venue
  * @param {string} venueId - Venue ID
  */
 async function clearStack(venueId) {
   try {
-    const stackKey = `automix:stack:${venueId}`;
-    await redis.del(stackKey);
+    // Update all queued requests to rejected
+    await Request.updateMany(
+      { venueId: venueId, status: "queued" },
+      { status: "rejected", flowStatus: "cleared" }
+    );
     
-    console.log(`🔄 Cleared stack for venue ${venueId}`);
-    return { success: true, message: "Stack cleared" };
+    console.log(`🔄 Cleared queue for venue ${venueId}`);
+    return { success: true, message: "Queue cleared" };
   } catch (err) {
-    console.error(`❌ Error clearing stack:`, err.message);
+    console.error(`❌ Error clearing queue:`, err.message);
     return { success: false, error: err.message };
   }
 }

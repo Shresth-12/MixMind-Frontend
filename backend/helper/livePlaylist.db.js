@@ -1,12 +1,9 @@
 const AdminFlag = require("../models/AdminFlag");
-const { Queue } = require("bullmq");
 
-const connection = {
-  host: process.env.REDIS_HOST || "127.0.0.1",
-  port: Number(process.env.REDIS_PORT) || 6379
-};
-
-const livePlaylistQueue = new Queue("live-playlist", { connection });
+/**
+ * Live Playlist DB helpers
+ * Note: Now using MongoDB polling instead of Redis queues
+ */
 
 async function isLivePlaylistEnabled() {
   const flag = await AdminFlag.findOne({ key: "LIVE_PLAYLIST" });
@@ -18,9 +15,8 @@ async function enableLivePlaylist() {
   if (!flag) flag = new AdminFlag({ key: "LIVE_PLAYLIST" });
   flag.enabled = true;
   await flag.save();
-
-  // Add a job to the queue so worker starts running
-  await livePlaylistQueue.add("runBatch", { timestamp: Date.now() });
+  
+  console.log(`✅ Live Playlist enabled - songRequestWorker will start processing`);
 }
 
 async function disableLivePlaylist() {
@@ -28,6 +24,7 @@ async function disableLivePlaylist() {
   if (flag) {
     flag.enabled = false;
     await flag.save();
+    console.log(`✅ Live Playlist disabled`);
   }
 }
 
